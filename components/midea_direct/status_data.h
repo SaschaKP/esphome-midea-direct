@@ -1,5 +1,6 @@
 #pragma once
 #include "frame_data.h"
+#include <cstring>
 
 namespace esphome {
 namespace midea {
