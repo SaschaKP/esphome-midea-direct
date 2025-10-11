@@ -7,6 +7,9 @@ namespace esphome {
 namespace midea {
 namespace ac {
 
+// Constants
+static constexpr uint32_t POWER_USAGE_QUERY_INTERVAL_MS = 10000;
+
 // Air conditioner control command
 struct Control {
   Optional<float> targetTemp{};
@@ -57,6 +60,9 @@ class AirConditioner : public ApplianceBase {
   Preset lastPreset_{Preset::PRESET_NONE};
   StatusData status_{};
   bool sendControl_{};
+  // Command coalescing
+  StatusData lastSentCommand_{};
+  uint32_t lastCommandTime_{0};
 };
 
 }  // namespace ac

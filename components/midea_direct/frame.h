@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <iterator>
+#include <cstdio>
 #include "frame_data.h"
 
 namespace esphome {
@@ -12,6 +13,7 @@ class Frame {
   Frame() = default;
   Frame(uint8_t appliance, uint8_t protocol, uint8_t type, const FrameData &data)
   : data_({START_BYTE, 0x00, appliance, 0x00, 0x00, 0x00, 0x00, 0x00, protocol, type}) {
+    data_.reserve(OFFSET_DATA + data.size() + 2); // Pre-allocate for data + CRC
     this->setData(data);
   }
   FrameData getData() const { return FrameData(this->data_.data() + OFFSET_DATA, this->len_() - OFFSET_DATA); }
@@ -24,7 +26,20 @@ class Frame {
   bool hasType(uint8_t value) const { return this->data_[OFFSET_TYPE] == value; }
   void setProtocol(uint8_t value) { this->data_[OFFSET_PROTOCOL] = value; }
   uint8_t getProtocol() const { return this->data_[OFFSET_PROTOCOL]; }
-  std::string toString() const;
+
+  // Optimized toString - avoid string creation for logging
+  std::string toString() const {
+    if (this->data_.empty()) return "";
+    std::string result;
+    result.reserve(this->data_.size() * 3); // Pre-allocate for "XX " format
+    for (uint8_t byte : this->data_) {
+      char buf[4];
+      sprintf(buf, "%02X ", byte);
+      result += buf;
+    }
+    if (!result.empty()) result.pop_back(); // Remove trailing space
+    return result;
+  }
 
  protected:
   std::vector<uint8_t> data_;
@@ -33,14 +48,14 @@ class Frame {
   uint8_t len_() const { return this->data_[OFFSET_LENGTH]; }
   void appendCS_() { this->data_.push_back(this->calcCS_()); }
   uint8_t calcCS_() const;
-  static const uint8_t START_BYTE = 0xAA;
-  static const uint8_t OFFSET_START = 0;
-  static const uint8_t OFFSET_LENGTH = 1;
-  static const uint8_t OFFSET_APPTYPE = 2;
-  static const uint8_t OFFSET_SYNC = 3;
-  static const uint8_t OFFSET_PROTOCOL = 8;
-  static const uint8_t OFFSET_TYPE = 9;
-  static const uint8_t OFFSET_DATA = 10;
+  static constexpr uint8_t START_BYTE = 0xAA;
+  static constexpr uint8_t OFFSET_START = 0;
+  static constexpr uint8_t OFFSET_LENGTH = 1;
+  static constexpr uint8_t OFFSET_APPTYPE = 2;
+  static constexpr uint8_t OFFSET_SYNC = 3;
+  static constexpr uint8_t OFFSET_PROTOCOL = 8;
+  static constexpr uint8_t OFFSET_TYPE = 9;
+  static constexpr uint8_t OFFSET_DATA = 10;
 };
 
 }  // namespace midea

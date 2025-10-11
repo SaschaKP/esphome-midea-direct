@@ -30,11 +30,6 @@ uint8_t FrameData::calcCRC_() const {
   return crc;
 }
 
-uint8_t FrameData::getValue_(uint8_t idx, uint8_t mask, uint8_t shift) const {
-  if (idx < this->data_.size())
-    return (this->data_[idx] >> shift) & mask;
-  return 0;
-}
 
 void NetworkNotifyData::setIP(uint8_t ipbyte1, uint8_t ipbyte2, uint8_t ipbyte3, uint8_t ipbyte4) {
   // Use little-endian format to match working frame data of original dongle key

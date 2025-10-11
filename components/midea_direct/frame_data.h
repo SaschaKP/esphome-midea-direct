@@ -10,8 +10,8 @@ class FrameData {
   FrameData() = delete;
   FrameData(std::vector<uint8_t>::const_iterator begin, std::vector<uint8_t>::const_iterator end) : data_(begin, end) {}
   FrameData(const uint8_t *data, uint8_t size) : data_(data, data + size) {}
-  FrameData(std::initializer_list<uint8_t> list) : data_(list) {}
-  FrameData(uint8_t size) : data_(size, 0) {}
+  FrameData(std::initializer_list<uint8_t> list) : data_(list) { data_.reserve(32); } // Pre-allocate for CRC operations
+  FrameData(uint8_t size) : data_(size, 0) { data_.reserve(size + 2); } // Pre-allocate space for CRC
   template<typename T> T to() { return std::move(*this); }
   const uint8_t *data() const { return this->data_.data(); }
   uint8_t size() const { return this->data_.size(); }
@@ -30,12 +30,22 @@ class FrameData {
   static uint8_t getID_() { return FrameData::id_++; }
   static uint8_t getRandom_() { return static_cast<uint8_t>(rand() & 0xFF); }
   uint8_t calcCRC_() const;
-  uint8_t getValue_(uint8_t idx, uint8_t mask = 255, uint8_t shift = 0) const;
+  uint8_t getValue_(uint8_t idx, uint8_t mask = 255, uint8_t shift = 0) const {
+    if (idx < this->data_.size())
+      return (this->data_[idx] >> shift) & mask;
+    return 0;
+  }
   void setValue_(uint8_t idx, uint8_t value, uint8_t mask = 255, uint8_t shift = 0) {
     this->data_[idx] &= ~(mask << shift);
     this->data_[idx] |= (value << shift);
   }
-  void setMask_(uint8_t idx, bool state, uint8_t mask = 255) { this->setValue_(idx, state ? mask : 0, mask); }
+  void setMask_(uint8_t idx, bool state, uint8_t mask = 255) {
+    if (state) {
+      this->data_[idx] |= mask;
+    } else {
+      this->data_[idx] &= ~mask;
+    }
+  }
 };
 
 class NetworkNotifyData : public FrameData {

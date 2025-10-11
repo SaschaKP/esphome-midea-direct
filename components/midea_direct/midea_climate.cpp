@@ -19,43 +19,51 @@ void MideaClimate::setup() {
   
   // Initialize ESPHome climate defaults
   if (supported_modes_.empty()) {
-    supported_modes_.insert(climate::CLIMATE_MODE_OFF);
-    supported_modes_.insert(climate::CLIMATE_MODE_AUTO);
-    supported_modes_.insert(climate::CLIMATE_MODE_COOL);
-    supported_modes_.insert(climate::CLIMATE_MODE_DRY);
-    supported_modes_.insert(climate::CLIMATE_MODE_HEAT);
-    supported_modes_.insert(climate::CLIMATE_MODE_FAN_ONLY);
+    supported_modes_ = {
+      climate::CLIMATE_MODE_OFF,
+      climate::CLIMATE_MODE_AUTO,
+      climate::CLIMATE_MODE_COOL,
+      climate::CLIMATE_MODE_DRY,
+      climate::CLIMATE_MODE_HEAT,
+      climate::CLIMATE_MODE_FAN_ONLY
+    };
   }
-  
+
   if (supported_fan_modes_.empty()) {
-    supported_fan_modes_.insert(climate::CLIMATE_FAN_AUTO);
-    supported_fan_modes_.insert(climate::CLIMATE_FAN_LOW);
-    supported_fan_modes_.insert(climate::CLIMATE_FAN_MEDIUM);
-    supported_fan_modes_.insert(climate::CLIMATE_FAN_HIGH);
+    supported_fan_modes_ = {
+      climate::CLIMATE_FAN_AUTO,
+      climate::CLIMATE_FAN_LOW,
+      climate::CLIMATE_FAN_MEDIUM,
+      climate::CLIMATE_FAN_HIGH
+    };
   }
-  
+
   if (supported_swing_modes_.empty()) {
-    supported_swing_modes_.insert(climate::CLIMATE_SWING_OFF);
-    supported_swing_modes_.insert(climate::CLIMATE_SWING_VERTICAL);
-    supported_swing_modes_.insert(climate::CLIMATE_SWING_HORIZONTAL);
-    supported_swing_modes_.insert(climate::CLIMATE_SWING_BOTH);
+    supported_swing_modes_ = {
+      climate::CLIMATE_SWING_OFF,
+      climate::CLIMATE_SWING_VERTICAL,
+      climate::CLIMATE_SWING_HORIZONTAL,
+      climate::CLIMATE_SWING_BOTH
+    };
   }
-  
+
   // FORCE ensure SWING_OFF is always available, regardless of autoconf
-  if (supported_swing_modes_.find(climate::CLIMATE_SWING_OFF) == supported_swing_modes_.end()) {
-    supported_swing_modes_.insert(climate::CLIMATE_SWING_OFF);
+  if (std::find(supported_swing_modes_.begin(), supported_swing_modes_.end(), climate::CLIMATE_SWING_OFF) == supported_swing_modes_.end()) {
+    supported_swing_modes_.push_back(climate::CLIMATE_SWING_OFF);
     ESP_LOGCONFIG(TAG, "Force-added CLIMATE_SWING_OFF to ensure disable option is available");
   }
-  
+
   if (supported_presets_.empty()) {
-    supported_presets_.insert(climate::CLIMATE_PRESET_NONE);
-    supported_presets_.insert(climate::CLIMATE_PRESET_ECO);
-    supported_presets_.insert(climate::CLIMATE_PRESET_SLEEP);
+    supported_presets_ = {
+      climate::CLIMATE_PRESET_NONE,
+      climate::CLIMATE_PRESET_ECO,
+      climate::CLIMATE_PRESET_SLEEP
+    };
   }
-  
+
   // FORCE ensure PRESET_NONE is always available, regardless of autoconf
-  if (supported_presets_.find(climate::CLIMATE_PRESET_NONE) == supported_presets_.end()) {
-    supported_presets_.insert(climate::CLIMATE_PRESET_NONE);
+  if (std::find(supported_presets_.begin(), supported_presets_.end(), climate::CLIMATE_PRESET_NONE) == supported_presets_.end()) {
+    supported_presets_.push_back(climate::CLIMATE_PRESET_NONE);
     ESP_LOGCONFIG(TAG, "Force-added CLIMATE_PRESET_NONE to ensure disable option is available");
   }
   
@@ -75,13 +83,14 @@ void MideaClimate::setup() {
 void MideaClimate::loop() {
   // Run main loop
   ApplianceBase::loop();
-  
+
   // Periodically log status for debugging (every 30 seconds)
   static uint32_t last_debug = 0;
-  if (esphome::millis() - last_debug > 30000) {
-    ESP_LOGD(TAG, "Status: mode=%d, temp=%.1f, indoor=%.1f", 
+  uint32_t now = esphome::millis();
+  if (ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_DEBUG && now - last_debug > DEBUG_LOG_INTERVAL_MS) {
+    ESP_LOGD(TAG, "Status: mode=%d, temp=%.1f, indoor=%.1f",
              static_cast<int>(this->getMode()), this->getTargetTemp(), this->getIndoorTemp());
-    last_debug = esphome::millis();
+    last_debug = now;
   }
 }
 
@@ -94,16 +103,7 @@ void MideaClimate::control(const climate::ClimateCall& call) {
   
   // Handle mode changes
   if (call.get_mode().has_value()) {
-    esphome::midea::ac::Mode midea_mode;
-    switch (call.get_mode().value()) {
-      case climate::CLIMATE_MODE_OFF: midea_mode = esphome::midea::ac::Mode::MODE_OFF; break;
-      case climate::CLIMATE_MODE_HEAT_COOL: midea_mode = esphome::midea::ac::Mode::MODE_HEAT_COOL; break;
-      case climate::CLIMATE_MODE_COOL: midea_mode = esphome::midea::ac::Mode::MODE_COOL; break;
-      case climate::CLIMATE_MODE_DRY: midea_mode = esphome::midea::ac::Mode::MODE_DRY; break;
-      case climate::CLIMATE_MODE_HEAT: midea_mode = esphome::midea::ac::Mode::MODE_HEAT; break;
-      case climate::CLIMATE_MODE_FAN_ONLY: midea_mode = esphome::midea::ac::Mode::MODE_FAN_ONLY; break;
-      default: midea_mode = esphome::midea::ac::Mode::MODE_OFF; break;
-    }
+    esphome::midea::ac::Mode midea_mode = this->esphome_mode_to_midea(call.get_mode().value());
     if (midea_mode != this->getMode()) {
       control.mode = midea_mode;
       has_control = true;
@@ -123,15 +123,7 @@ void MideaClimate::control(const climate::ClimateCall& call) {
   
   // Handle fan mode changes
   if (call.get_fan_mode().has_value()) {
-    esphome::midea::ac::FanMode midea_fan;
-    switch (call.get_fan_mode().value()) {
-      case climate::CLIMATE_FAN_AUTO: midea_fan = esphome::midea::ac::FanMode::FAN_AUTO; break;
-      case climate::CLIMATE_FAN_LOW: midea_fan = esphome::midea::ac::FanMode::FAN_LOW; break;
-      case climate::CLIMATE_FAN_MEDIUM: midea_fan = esphome::midea::ac::FanMode::FAN_MEDIUM; break;
-      case climate::CLIMATE_FAN_HIGH: midea_fan = esphome::midea::ac::FanMode::FAN_HIGH; break;
-      case climate::CLIMATE_FAN_QUIET: midea_fan = esphome::midea::ac::FanMode::FAN_SILENT; break;
-      default: midea_fan = esphome::midea::ac::FanMode::FAN_AUTO; break;
-    }
+    esphome::midea::ac::FanMode midea_fan = this->esphome_fan_to_midea(call.get_fan_mode().value());
     if (midea_fan != this->getFanMode()) {
       control.fanMode = midea_fan;
       has_control = true;
@@ -141,14 +133,7 @@ void MideaClimate::control(const climate::ClimateCall& call) {
   
   // Handle swing mode changes
   if (call.get_swing_mode().has_value()) {
-    esphome::midea::ac::SwingMode midea_swing;
-    switch (call.get_swing_mode().value()) {
-      case climate::CLIMATE_SWING_OFF: midea_swing = esphome::midea::ac::SwingMode::SWING_OFF; break;
-      case climate::CLIMATE_SWING_VERTICAL: midea_swing = esphome::midea::ac::SwingMode::SWING_VERTICAL; break;
-      case climate::CLIMATE_SWING_HORIZONTAL: midea_swing = esphome::midea::ac::SwingMode::SWING_HORIZONTAL; break;
-      case climate::CLIMATE_SWING_BOTH: midea_swing = esphome::midea::ac::SwingMode::SWING_BOTH; break;
-      default: midea_swing = esphome::midea::ac::SwingMode::SWING_OFF; break;
-    }
+    esphome::midea::ac::SwingMode midea_swing = this->esphome_swing_to_midea(call.get_swing_mode().value());
     if (midea_swing != this->getSwingMode()) {
       control.swingMode = midea_swing;
       has_control = true;
@@ -158,15 +143,7 @@ void MideaClimate::control(const climate::ClimateCall& call) {
 
   // Handle preset changes
   if (call.get_preset().has_value()) {
-    esphome::midea::ac::Preset midea_preset;
-    switch (call.get_preset().value()) {
-      case climate::CLIMATE_PRESET_NONE: midea_preset = esphome::midea::ac::Preset::PRESET_NONE; break;
-      case climate::CLIMATE_PRESET_ECO: midea_preset = esphome::midea::ac::Preset::PRESET_ECO; break;
-      case climate::CLIMATE_PRESET_SLEEP: midea_preset = esphome::midea::ac::Preset::PRESET_SLEEP; break;
-      case climate::CLIMATE_PRESET_BOOST: midea_preset = esphome::midea::ac::Preset::PRESET_BOOST; break;
-      case climate::CLIMATE_PRESET_AWAY: midea_preset = esphome::midea::ac::Preset::PRESET_AWAY; break;
-      default: midea_preset = esphome::midea::ac::Preset::PRESET_NONE; break;
-    }
+    esphome::midea::ac::Preset midea_preset = this->esphome_preset_to_midea(call.get_preset().value());
     if (midea_preset != this->getPreset()) {
       control.preset = midea_preset;
       has_control = true;
@@ -220,17 +197,7 @@ void MideaClimate::control(const climate::ClimateCall& call) {
     bool ui_update_needed = false;
     
     if (control.mode.has_value()) {
-      // Convert Midea mode back to ESPHome mode
-      climate::ClimateMode new_esphome_mode;
-      switch (control.mode.value()) {
-        case esphome::midea::ac::Mode::MODE_OFF: new_esphome_mode = climate::CLIMATE_MODE_OFF; break;
-        case esphome::midea::ac::Mode::MODE_HEAT_COOL: new_esphome_mode = climate::CLIMATE_MODE_HEAT_COOL; break;
-        case esphome::midea::ac::Mode::MODE_COOL: new_esphome_mode = climate::CLIMATE_MODE_COOL; break;
-        case esphome::midea::ac::Mode::MODE_DRY: new_esphome_mode = climate::CLIMATE_MODE_DRY; break;
-        case esphome::midea::ac::Mode::MODE_HEAT: new_esphome_mode = climate::CLIMATE_MODE_HEAT; break;
-        case esphome::midea::ac::Mode::MODE_FAN_ONLY: new_esphome_mode = climate::CLIMATE_MODE_FAN_ONLY; break;
-        default: new_esphome_mode = climate::CLIMATE_MODE_OFF; break;
-      }
+      climate::ClimateMode new_esphome_mode = this->midea_mode_to_esphome(control.mode.value());
       if (this->mode != new_esphome_mode) {
         this->mode = new_esphome_mode;
         ui_update_needed = true;
@@ -248,17 +215,7 @@ void MideaClimate::control(const climate::ClimateCall& call) {
     }
 
     if (control.fanMode.has_value()) {
-      // Convert Midea fan mode back to ESPHome fan mode
-      climate::ClimateFanMode new_esphome_fan;
-      switch (control.fanMode.value()) {
-        case esphome::midea::ac::FanMode::FAN_AUTO: new_esphome_fan = climate::CLIMATE_FAN_AUTO; break;
-        case esphome::midea::ac::FanMode::FAN_LOW: new_esphome_fan = climate::CLIMATE_FAN_LOW; break;
-        case esphome::midea::ac::FanMode::FAN_MEDIUM: new_esphome_fan = climate::CLIMATE_FAN_MEDIUM; break;
-        case esphome::midea::ac::FanMode::FAN_HIGH: new_esphome_fan = climate::CLIMATE_FAN_HIGH; break;
-        case esphome::midea::ac::FanMode::FAN_SILENT: new_esphome_fan = climate::CLIMATE_FAN_QUIET; break;
-        case esphome::midea::ac::FanMode::FAN_TURBO: new_esphome_fan = climate::CLIMATE_FAN_HIGH; break; // Map turbo to high
-        default: new_esphome_fan = climate::CLIMATE_FAN_AUTO; break;
-      }
+      climate::ClimateFanMode new_esphome_fan = this->midea_fan_to_esphome(control.fanMode.value());
       if (this->fan_mode != new_esphome_fan) {
         this->fan_mode = new_esphome_fan;
         ui_update_needed = true;
@@ -267,15 +224,7 @@ void MideaClimate::control(const climate::ClimateCall& call) {
     }
 
     if (control.swingMode.has_value()) {
-      // Convert Midea swing mode back to ESPHome swing mode
-      climate::ClimateSwingMode new_esphome_swing;
-      switch (control.swingMode.value()) {
-        case esphome::midea::ac::SwingMode::SWING_OFF: new_esphome_swing = climate::CLIMATE_SWING_OFF; break;
-        case esphome::midea::ac::SwingMode::SWING_VERTICAL: new_esphome_swing = climate::CLIMATE_SWING_VERTICAL; break;
-        case esphome::midea::ac::SwingMode::SWING_HORIZONTAL: new_esphome_swing = climate::CLIMATE_SWING_HORIZONTAL; break;
-        case esphome::midea::ac::SwingMode::SWING_BOTH: new_esphome_swing = climate::CLIMATE_SWING_BOTH; break;
-        default: new_esphome_swing = climate::CLIMATE_SWING_OFF; break;
-      }
+      climate::ClimateSwingMode new_esphome_swing = this->midea_swing_to_esphome(control.swingMode.value());
       if (this->swing_mode != new_esphome_swing) {
         this->swing_mode = new_esphome_swing;
         ui_update_needed = true;
@@ -284,16 +233,7 @@ void MideaClimate::control(const climate::ClimateCall& call) {
     }
 
     if (control.preset.has_value()) {
-      // Convert Midea preset back to ESPHome preset
-      climate::ClimatePreset new_esphome_preset;
-      switch (control.preset.value()) {
-        case esphome::midea::ac::Preset::PRESET_NONE: new_esphome_preset = climate::CLIMATE_PRESET_NONE; break;
-        case esphome::midea::ac::Preset::PRESET_ECO: new_esphome_preset = climate::CLIMATE_PRESET_ECO; break;
-        case esphome::midea::ac::Preset::PRESET_BOOST: new_esphome_preset = climate::CLIMATE_PRESET_BOOST; break;
-        case esphome::midea::ac::Preset::PRESET_SLEEP: new_esphome_preset = climate::CLIMATE_PRESET_SLEEP; break;
-        case esphome::midea::ac::Preset::PRESET_AWAY: new_esphome_preset = climate::CLIMATE_PRESET_AWAY; break;
-        default: new_esphome_preset = climate::CLIMATE_PRESET_NONE; break;
-      }
+      climate::ClimatePreset new_esphome_preset = this->midea_preset_to_esphome(control.preset.value());
       if (this->preset != new_esphome_preset) {
         this->preset = new_esphome_preset;
         ui_update_needed = true;
@@ -306,16 +246,7 @@ void MideaClimate::control(const climate::ClimateCall& call) {
       // For custom fan modes, we also need to update the standard fan_mode field
       // The ESPHome UI will show the custom fan mode name
       if (control.fanMode.has_value()) {
-        climate::ClimateFanMode new_esphome_fan;
-        switch (control.fanMode.value()) {
-          case esphome::midea::ac::FanMode::FAN_AUTO: new_esphome_fan = climate::CLIMATE_FAN_AUTO; break;
-          case esphome::midea::ac::FanMode::FAN_LOW: new_esphome_fan = climate::CLIMATE_FAN_LOW; break;
-          case esphome::midea::ac::FanMode::FAN_MEDIUM: new_esphome_fan = climate::CLIMATE_FAN_MEDIUM; break;
-          case esphome::midea::ac::FanMode::FAN_HIGH: new_esphome_fan = climate::CLIMATE_FAN_HIGH; break;
-          case esphome::midea::ac::FanMode::FAN_SILENT: new_esphome_fan = climate::CLIMATE_FAN_QUIET; break;
-          case esphome::midea::ac::FanMode::FAN_TURBO: new_esphome_fan = climate::CLIMATE_FAN_HIGH; break;
-          default: new_esphome_fan = climate::CLIMATE_FAN_AUTO; break;
-        }
+        climate::ClimateFanMode new_esphome_fan = this->midea_fan_to_esphome(control.fanMode.value());
         if (this->fan_mode != new_esphome_fan) {
           this->fan_mode = new_esphome_fan;
           ui_update_needed = true;
@@ -328,15 +259,7 @@ void MideaClimate::control(const climate::ClimateCall& call) {
     if (!requested_custom_preset.empty()) {
       // For custom presets, we also need to update the standard preset field
       if (control.preset.has_value()) {
-        climate::ClimatePreset new_esphome_preset;
-        switch (control.preset.value()) {
-          case esphome::midea::ac::Preset::PRESET_NONE: new_esphome_preset = climate::CLIMATE_PRESET_NONE; break;
-          case esphome::midea::ac::Preset::PRESET_ECO: new_esphome_preset = climate::CLIMATE_PRESET_ECO; break;
-          case esphome::midea::ac::Preset::PRESET_BOOST: new_esphome_preset = climate::CLIMATE_PRESET_BOOST; break;
-          case esphome::midea::ac::Preset::PRESET_SLEEP: new_esphome_preset = climate::CLIMATE_PRESET_SLEEP; break;
-          case esphome::midea::ac::Preset::PRESET_AWAY: new_esphome_preset = climate::CLIMATE_PRESET_AWAY; break;
-          default: new_esphome_preset = climate::CLIMATE_PRESET_NONE; break;
-        }
+        climate::ClimatePreset new_esphome_preset = this->midea_preset_to_esphome(control.preset.value());
         if (this->preset != new_esphome_preset) {
           this->preset = new_esphome_preset;
           ui_update_needed = true;
@@ -414,12 +337,10 @@ climate::ClimateTraits MideaClimate::traits() {
     traits.add_supported_preset(preset);
   }
   
-  // Add custom fan modes (MISSING FUNCTIONALITY ADDED!)
   for (const auto& custom_fan_mode : custom_fan_modes_) {
     traits.add_supported_custom_fan_mode(custom_fan_mode);
   }
   
-  // Add custom presets (MISSING FUNCTIONALITY ADDED!)
   for (const auto& custom_preset : custom_presets_) {
     traits.add_supported_custom_preset(custom_preset);
   }
@@ -436,7 +357,6 @@ climate::ClimateTraits MideaClimate::traits() {
 void MideaClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "Midea Climate:");
   LOG_CLIMATE("", "Midea Climate", this);
-  // FIXED: Use public getter methods instead of private member access
   ESP_LOGCONFIG(TAG, "  Period: %d ms", this->getPeriod());
   ESP_LOGCONFIG(TAG, "  Timeout: %d ms", this->getTimeout());
   ESP_LOGCONFIG(TAG, "  Max attempts: %d", this->getNumAttempts());
@@ -455,31 +375,19 @@ void MideaClimate::dump_config() {
 
 // Configuration setters
 void MideaClimate::set_supported_modes(const std::vector<climate::ClimateMode>& modes) {
-  supported_modes_.clear();
-  for (auto mode : modes) {
-    supported_modes_.insert(mode);
-  }
+  supported_modes_ = modes;
 }
 
 void MideaClimate::set_supported_fan_modes(const std::vector<climate::ClimateFanMode>& modes) {
-  supported_fan_modes_.clear();
-  for (auto mode : modes) {
-    supported_fan_modes_.insert(mode);
-  }
+  supported_fan_modes_ = modes;
 }
 
 void MideaClimate::set_supported_swing_modes(const std::vector<climate::ClimateSwingMode>& modes) {
-  supported_swing_modes_.clear();
-  for (auto mode : modes) {
-    supported_swing_modes_.insert(mode);
-  }
+  supported_swing_modes_ = modes;
 }
 
 void MideaClimate::set_supported_presets(const std::vector<climate::ClimatePreset>& presets) {
-  supported_presets_.clear();
-  for (auto preset : presets) {
-    supported_presets_.insert(preset);
-  }
+  supported_presets_ = presets;
 }
 
 // Custom mode setters
@@ -536,69 +444,122 @@ void MideaClimate::sendUpdate() {
   } else {
     ESP_LOGV(TAG, "ESPHome state unchanged - skipping publish_state()");
   }
-  
+
   // Update auxiliary sensors (only when they have valid data)
   if (power_sensor_ && this->getPowerUsage() > 0) {
     power_sensor_->publish_state(this->getPowerUsage());
     ESP_LOGV(TAG, "Power sensor updated: %.1fW", this->getPowerUsage());
   }
-  
+
   if (outdoor_temperature_sensor_ && !std::isnan(this->getOutdoorTemp())) {
     outdoor_temperature_sensor_->publish_state(this->getOutdoorTemp());
     ESP_LOGV(TAG, "Outdoor temperature updated: %.1f°C", this->getOutdoorTemp());
   }
-  
+
   if (indoor_humidity_sensor_ && !std::isnan(this->getIndoorHum())) {
     indoor_humidity_sensor_->publish_state(this->getIndoorHum());
     ESP_LOGV(TAG, "Indoor humidity updated: %.1f%%", this->getIndoorHum());
   }
 }
 
+// Helper functions for enum conversions
+climate::ClimateMode MideaClimate::midea_mode_to_esphome(esphome::midea::ac::Mode mode) const {
+  switch (mode) {
+    case esphome::midea::ac::Mode::MODE_OFF: return climate::CLIMATE_MODE_OFF;
+    case esphome::midea::ac::Mode::MODE_HEAT_COOL: return climate::CLIMATE_MODE_HEAT_COOL;
+    case esphome::midea::ac::Mode::MODE_COOL: return climate::CLIMATE_MODE_COOL;
+    case esphome::midea::ac::Mode::MODE_DRY: return climate::CLIMATE_MODE_DRY;
+    case esphome::midea::ac::Mode::MODE_HEAT: return climate::CLIMATE_MODE_HEAT;
+    case esphome::midea::ac::Mode::MODE_FAN_ONLY: return climate::CLIMATE_MODE_FAN_ONLY;
+    default: return climate::CLIMATE_MODE_OFF;
+  }
+}
+
+esphome::midea::ac::Mode MideaClimate::esphome_mode_to_midea(climate::ClimateMode mode) const {
+  switch (mode) {
+    case climate::CLIMATE_MODE_OFF: return esphome::midea::ac::Mode::MODE_OFF;
+    case climate::CLIMATE_MODE_HEAT_COOL: return esphome::midea::ac::Mode::MODE_HEAT_COOL;
+    case climate::CLIMATE_MODE_COOL: return esphome::midea::ac::Mode::MODE_COOL;
+    case climate::CLIMATE_MODE_DRY: return esphome::midea::ac::Mode::MODE_DRY;
+    case climate::CLIMATE_MODE_HEAT: return esphome::midea::ac::Mode::MODE_HEAT;
+    case climate::CLIMATE_MODE_FAN_ONLY: return esphome::midea::ac::Mode::MODE_FAN_ONLY;
+    default: return esphome::midea::ac::Mode::MODE_OFF;
+  }
+}
+
+climate::ClimateFanMode MideaClimate::midea_fan_to_esphome(esphome::midea::ac::FanMode fan) const {
+  switch (fan) {
+    case esphome::midea::ac::FanMode::FAN_AUTO: return climate::CLIMATE_FAN_AUTO;
+    case esphome::midea::ac::FanMode::FAN_LOW: return climate::CLIMATE_FAN_LOW;
+    case esphome::midea::ac::FanMode::FAN_MEDIUM: return climate::CLIMATE_FAN_MEDIUM;
+    case esphome::midea::ac::FanMode::FAN_HIGH: return climate::CLIMATE_FAN_HIGH;
+    case esphome::midea::ac::FanMode::FAN_SILENT: return climate::CLIMATE_FAN_QUIET;
+    case esphome::midea::ac::FanMode::FAN_TURBO: return climate::CLIMATE_FAN_HIGH; // Map turbo to high
+    default: return climate::CLIMATE_FAN_AUTO;
+  }
+}
+
+esphome::midea::ac::FanMode MideaClimate::esphome_fan_to_midea(climate::ClimateFanMode fan) const {
+  switch (fan) {
+    case climate::CLIMATE_FAN_AUTO: return esphome::midea::ac::FanMode::FAN_AUTO;
+    case climate::CLIMATE_FAN_LOW: return esphome::midea::ac::FanMode::FAN_LOW;
+    case climate::CLIMATE_FAN_MEDIUM: return esphome::midea::ac::FanMode::FAN_MEDIUM;
+    case climate::CLIMATE_FAN_HIGH: return esphome::midea::ac::FanMode::FAN_HIGH;
+    case climate::CLIMATE_FAN_QUIET: return esphome::midea::ac::FanMode::FAN_SILENT;
+    default: return esphome::midea::ac::FanMode::FAN_AUTO;
+  }
+}
+
+climate::ClimateSwingMode MideaClimate::midea_swing_to_esphome(esphome::midea::ac::SwingMode swing) const {
+  switch (swing) {
+    case esphome::midea::ac::SwingMode::SWING_OFF: return climate::CLIMATE_SWING_OFF;
+    case esphome::midea::ac::SwingMode::SWING_VERTICAL: return climate::CLIMATE_SWING_VERTICAL;
+    case esphome::midea::ac::SwingMode::SWING_HORIZONTAL: return climate::CLIMATE_SWING_HORIZONTAL;
+    case esphome::midea::ac::SwingMode::SWING_BOTH: return climate::CLIMATE_SWING_BOTH;
+    default: return climate::CLIMATE_SWING_OFF;
+  }
+}
+
+esphome::midea::ac::SwingMode MideaClimate::esphome_swing_to_midea(climate::ClimateSwingMode swing) const {
+  switch (swing) {
+    case climate::CLIMATE_SWING_OFF: return esphome::midea::ac::SwingMode::SWING_OFF;
+    case climate::CLIMATE_SWING_VERTICAL: return esphome::midea::ac::SwingMode::SWING_VERTICAL;
+    case climate::CLIMATE_SWING_HORIZONTAL: return esphome::midea::ac::SwingMode::SWING_HORIZONTAL;
+    case climate::CLIMATE_SWING_BOTH: return esphome::midea::ac::SwingMode::SWING_BOTH;
+    default: return esphome::midea::ac::SwingMode::SWING_OFF;
+  }
+}
+
+climate::ClimatePreset MideaClimate::midea_preset_to_esphome(esphome::midea::ac::Preset preset) const {
+  switch (preset) {
+    case esphome::midea::ac::Preset::PRESET_NONE: return climate::CLIMATE_PRESET_NONE;
+    case esphome::midea::ac::Preset::PRESET_ECO: return climate::CLIMATE_PRESET_ECO;
+    case esphome::midea::ac::Preset::PRESET_BOOST: return climate::CLIMATE_PRESET_BOOST;
+    case esphome::midea::ac::Preset::PRESET_SLEEP: return climate::CLIMATE_PRESET_SLEEP;
+    case esphome::midea::ac::Preset::PRESET_AWAY: return climate::CLIMATE_PRESET_AWAY;
+    default: return climate::CLIMATE_PRESET_NONE;
+  }
+}
+
+esphome::midea::ac::Preset MideaClimate::esphome_preset_to_midea(climate::ClimatePreset preset) const {
+  switch (preset) {
+    case climate::CLIMATE_PRESET_NONE: return esphome::midea::ac::Preset::PRESET_NONE;
+    case climate::CLIMATE_PRESET_ECO: return esphome::midea::ac::Preset::PRESET_ECO;
+    case climate::CLIMATE_PRESET_BOOST: return esphome::midea::ac::Preset::PRESET_BOOST;
+    case climate::CLIMATE_PRESET_SLEEP: return esphome::midea::ac::Preset::PRESET_SLEEP;
+    case climate::CLIMATE_PRESET_AWAY: return esphome::midea::ac::Preset::PRESET_AWAY;
+    default: return esphome::midea::ac::Preset::PRESET_NONE;
+  }
+}
+
 void MideaClimate::update_esphome_state() {
   // Sync MideaUART_v2 state to ESPHome climate state
-  // Convert Midea mode to ESPHome mode
-  switch (this->getMode()) {
-    case esphome::midea::ac::Mode::MODE_OFF: this->mode = climate::CLIMATE_MODE_OFF; break;
-    case esphome::midea::ac::Mode::MODE_HEAT_COOL: this->mode = climate::CLIMATE_MODE_HEAT_COOL; break;
-    case esphome::midea::ac::Mode::MODE_COOL: this->mode = climate::CLIMATE_MODE_COOL; break;
-    case esphome::midea::ac::Mode::MODE_DRY: this->mode = climate::CLIMATE_MODE_DRY; break;
-    case esphome::midea::ac::Mode::MODE_HEAT: this->mode = climate::CLIMATE_MODE_HEAT; break;
-    case esphome::midea::ac::Mode::MODE_FAN_ONLY: this->mode = climate::CLIMATE_MODE_FAN_ONLY; break;
-    default: this->mode = climate::CLIMATE_MODE_OFF; break;
-  }
-
+  this->mode = this->midea_mode_to_esphome(this->getMode());
   this->target_temperature = this->getTargetTemp();
   this->current_temperature = this->getIndoorTemp();
-
-  // Convert Midea fan mode to ESPHome fan mode
-  switch (this->getFanMode()) {
-    case esphome::midea::ac::FanMode::FAN_AUTO: this->fan_mode = climate::CLIMATE_FAN_AUTO; break;
-    case esphome::midea::ac::FanMode::FAN_LOW: this->fan_mode = climate::CLIMATE_FAN_LOW; break;
-    case esphome::midea::ac::FanMode::FAN_MEDIUM: this->fan_mode = climate::CLIMATE_FAN_MEDIUM; break;
-    case esphome::midea::ac::FanMode::FAN_HIGH: this->fan_mode = climate::CLIMATE_FAN_HIGH; break;
-    case esphome::midea::ac::FanMode::FAN_SILENT: this->fan_mode = climate::CLIMATE_FAN_QUIET; break;
-    case esphome::midea::ac::FanMode::FAN_TURBO: this->fan_mode = climate::CLIMATE_FAN_HIGH; break; // Map turbo to high
-    default: this->fan_mode = climate::CLIMATE_FAN_AUTO; break;
-  }
-
-  // Convert Midea swing mode to ESPHome swing mode
-  switch (this->getSwingMode()) {
-    case esphome::midea::ac::SwingMode::SWING_OFF: this->swing_mode = climate::CLIMATE_SWING_OFF; break;
-    case esphome::midea::ac::SwingMode::SWING_VERTICAL: this->swing_mode = climate::CLIMATE_SWING_VERTICAL; break;
-    case esphome::midea::ac::SwingMode::SWING_HORIZONTAL: this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL; break;
-    case esphome::midea::ac::SwingMode::SWING_BOTH: this->swing_mode = climate::CLIMATE_SWING_BOTH; break;
-    default: this->swing_mode = climate::CLIMATE_SWING_OFF; break;
-  }
-
-  // Convert Midea preset to ESPHome preset
-  switch (this->getPreset()) {
-    case esphome::midea::ac::Preset::PRESET_NONE: this->preset = climate::CLIMATE_PRESET_NONE; break;
-    case esphome::midea::ac::Preset::PRESET_ECO: this->preset = climate::CLIMATE_PRESET_ECO; break;
-    case esphome::midea::ac::Preset::PRESET_BOOST: this->preset = climate::CLIMATE_PRESET_BOOST; break;
-    case esphome::midea::ac::Preset::PRESET_SLEEP: this->preset = climate::CLIMATE_PRESET_SLEEP; break;
-    case esphome::midea::ac::Preset::PRESET_AWAY: this->preset = climate::CLIMATE_PRESET_AWAY; break;
-    default: this->preset = climate::CLIMATE_PRESET_NONE; break;
-  }
+  this->fan_mode = this->midea_fan_to_esphome(this->getFanMode());
+  this->swing_mode = this->midea_swing_to_esphome(this->getSwingMode());
+  this->preset = this->midea_preset_to_esphome(this->getPreset());
 }
 
 
@@ -626,7 +587,7 @@ void MideaClimate::onIdle_() {
   
   // Skip state change detection for 2 seconds after immediate control updates
   // This prevents redundant updates right after user interactions
-  if (last_control_time_ > 0 && (esphome::millis() - last_control_time_) < 2000) {
+  if (last_control_time_ > 0 && (esphome::millis() - last_control_time_) < CONTROL_UPDATE_SKIP_MS) {
     return;
   }
   
@@ -690,7 +651,7 @@ void MideaClimate::onIdle_() {
   } else {
     // Still log status occasionally for debugging, avoid spamming state changes
     static uint32_t last_debug = 0;
-    if (esphome::millis() - last_debug > 30000) {
+    if (ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE && esphome::millis() - last_debug > DEBUG_LOG_INTERVAL_MS) {
       ESP_LOGV(TAG, "onIdle_: No state changes - Target=%.1f, Indoor=%.1f, Mode=%d",
                current_target, current_indoor, static_cast<int>(current_mode));
       last_debug = esphome::millis();

@@ -27,13 +27,20 @@ bool ApplianceBase::FrameReceiver::read(uart::UARTDevice *uart_device) {
       break;
     }
     const uint8_t length = this->data_.size();
+
+    // Skip invalid start bytes
     if (length == OFFSET_START && data != START_BYTE)
       continue;
+
+    // Skip invalid length bytes
     if (length == OFFSET_LENGTH && data <= OFFSET_DATA) {
       this->data_.clear();
       continue;
     }
+
     this->data_.push_back(data);
+
+    // Check if we have a complete frame
     if (length > OFFSET_DATA && length >= this->data_[OFFSET_LENGTH]) {
       if (this->isValid())
         return true;
@@ -71,7 +78,10 @@ void ApplianceBase::loop() {
   if (this->isBusy_ || this->isWaitForResponse_())
     return;
   if (this->queue_.empty()) {
-    this->onIdle_();
+    // Skip periodic requests if we have pending user commands
+    if (!this->shouldSkipPeriodicRequests()) {
+      this->onIdle_();
+    }
     return;
   }
   this->request_ = this->queue_.front();
@@ -174,7 +184,11 @@ void ApplianceBase::sendNetworkNotify_(FrameType msgType) {
 }
 
 void ApplianceBase::resetTimeout_() {
-  this->responseTimer_.setCallback([this](Timer *timer) {
+  this->resetTimeout_(this->timeout_);
+}
+
+void ApplianceBase::resetTimeout_(uint32_t customTimeout) {
+  this->responseTimer_.setCallback([this, customTimeout](Timer *timer) {
     ESP_LOGD(TAG, "Response timeout...");
     if (!--this->remainAttempts_) {
       if (this->request_->onError != nullptr)
@@ -184,9 +198,9 @@ void ApplianceBase::resetTimeout_() {
     }
     ESP_LOGD(TAG, "Sending request again. Attempts left: %d...", this->remainAttempts_);
     this->sendRequest_(this->request_);
-    this->resetTimeout_();
+    this->resetTimeout_(customTimeout);
   });
-  this->responseTimer_.start(this->timeout_);
+  this->responseTimer_.start(customTimeout);
 }
 
 void ApplianceBase::destroyRequest_() {
@@ -194,6 +208,8 @@ void ApplianceBase::destroyRequest_() {
   this->responseTimer_.stop();
   delete this->request_;
   this->request_ = nullptr;
+  // Reset user command flag when request is destroyed
+  this->has_pending_user_command_ = false;
 }
 
 void ApplianceBase::sendFrame_(FrameType type, const FrameData &data) {
@@ -208,14 +224,14 @@ void ApplianceBase::sendFrame_(FrameType type, const FrameData &data) {
   this->periodTimer_.start(this->period_);
 }
 
-void ApplianceBase::queueRequest_(FrameType type, FrameData data, ResponseHandler onData, Handler onSuccess, Handler onError) {
+void ApplianceBase::queueRequest_(FrameType type, FrameData data, ResponseHandler onData, Handler onSuccess, Handler onError, RequestPriority priority) {
   ESP_LOGD(TAG, "Enqueuing the request...");
-  this->queue_.push_back(new Request{std::move(data), std::move(onData), std::move(onSuccess), std::move(onError), type});
+  this->queue_.push_back(new Request{std::move(data), std::move(onData), std::move(onSuccess), std::move(onError), type, priority});
 }
 
 void ApplianceBase::queueRequestPriority_(FrameType type, FrameData data, ResponseHandler onData, Handler onSuccess, Handler onError) {
   ESP_LOGD(TAG, "Priority request queuing...");
-  this->queue_.push_front(new Request{std::move(data), std::move(onData), std::move(onSuccess), std::move(onError), type});
+  this->queue_.push_front(new Request{std::move(data), std::move(onData), std::move(onSuccess), std::move(onError), type, PRIORITY_USER_COMMAND});
 }
 
 void ApplianceBase::sendImmediate(FrameType type, FrameData data, ResponseHandler onData, Handler onSuccess, Handler onError) {
@@ -234,6 +250,64 @@ void ApplianceBase::sendImmediate(FrameType type, FrameData data, ResponseHandle
     ESP_LOGD(TAG, "Queuing priority request (not immediate)...");
     queueRequestPriority_(type, std::move(data), std::move(onData), std::move(onSuccess), std::move(onError));
   }
+}
+
+void ApplianceBase::sendUserCommand(FrameType type, FrameData data, ResponseHandler onData, Handler onSuccess, Handler onError) {
+  // Mark that we have a pending user command
+  has_pending_user_command_ = true;
+  last_user_command_time_ = esphome::millis();
+
+  // Cancel any current non-user request to prioritize user command
+  if (isWaitForResponse_() && request_ != nullptr) {
+    ESP_LOGD(TAG, "Cancelling current request for user command priority...");
+    cancelCurrentRequest();
+  }
+
+  // Clear any queued background requests to prioritize user command
+  auto it = queue_.begin();
+  while (it != queue_.end()) {
+    if ((*it)->priority == PRIORITY_BACKGROUND) {
+      ESP_LOGD(TAG, "Removing background request from queue for user command priority");
+      delete *it;
+      it = queue_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  // Send immediately if possible, otherwise priority queue
+  if (!isBusy_ && queue_.empty()) {
+    ESP_LOGD(TAG, "Sending user command immediately...");
+    Request *req = new Request{std::move(data), std::move(onData), std::move(onSuccess), std::move(onError), type};
+    sendRequest_(req);
+    if (req->onData != nullptr) {
+      resetAttempts_();
+      // Use shorter timeout for user commands
+      resetTimeout_(USER_COMMAND_TIMEOUT_MS);
+      request_ = req;
+    } else {
+      delete req;
+    }
+  } else {
+    ESP_LOGD(TAG, "Queuing user command with priority...");
+    queueRequestPriority_(type, std::move(data), std::move(onData), std::move(onSuccess), std::move(onError));
+  }
+}
+
+void ApplianceBase::cancelCurrentRequest() {
+  if (request_ != nullptr) {
+    ESP_LOGD(TAG, "Cancelling current request...");
+    responseTimer_.stop();
+    delete request_;
+    request_ = nullptr;
+    remainAttempts_ = 0;
+  }
+}
+
+bool ApplianceBase::shouldSkipPeriodicRequests() const {
+  // Skip periodic requests if we have a recent user command pending
+  return has_pending_user_command_ &&
+         (esphome::millis() - last_user_command_time_) < 5000; // 5 seconds grace period
 }
 
 void ApplianceBase::setBeeper(bool value) {

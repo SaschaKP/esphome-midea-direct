@@ -5,10 +5,15 @@
 #include "esphome/components/uart/uart.h"
 #include "esphome/core/component.h"
 #include "air_conditioner.h"
-#include <set>
+#include <vector>
+#include <algorithm>
 
 namespace esphome {
 namespace midea_direct {
+
+// Constants for timing and intervals
+static constexpr uint32_t DEBUG_LOG_INTERVAL_MS = 30000;
+static constexpr uint32_t CONTROL_UPDATE_SKIP_MS = 2000;
 
 // ESPHome climate wrapper for MideaUART_v2 AirConditioner
 class MideaClimate : public climate::Climate, public Component, public uart::UARTDevice, public esphome::midea::ac::AirConditioner {
@@ -60,10 +65,10 @@ class MideaClimate : public climate::Climate, public Component, public uart::UAR
   void sendUpdate();
   
   // ESPHome configuration
-  std::set<climate::ClimateMode> supported_modes_;
-  std::set<climate::ClimateFanMode> supported_fan_modes_;
-  std::set<climate::ClimateSwingMode> supported_swing_modes_;
-  std::set<climate::ClimatePreset> supported_presets_;
+  std::vector<climate::ClimateMode> supported_modes_;
+  std::vector<climate::ClimateFanMode> supported_fan_modes_;
+  std::vector<climate::ClimateSwingMode> supported_swing_modes_;
+  std::vector<climate::ClimatePreset> supported_presets_;
   
   // Custom mode configuration
   std::vector<std::string> custom_fan_modes_;
@@ -77,11 +82,20 @@ class MideaClimate : public climate::Climate, public Component, public uart::UAR
  private:
   // Setup state tracking
   bool setup_complete_ = false;
-  
+
   // Control tracking to prevent redundant updates
   uint32_t last_control_time_ = 0;
-  
-  
+
+  // Helper functions for enum conversions
+  climate::ClimateMode midea_mode_to_esphome(esphome::midea::ac::Mode mode) const;
+  esphome::midea::ac::Mode esphome_mode_to_midea(climate::ClimateMode mode) const;
+  climate::ClimateFanMode midea_fan_to_esphome(esphome::midea::ac::FanMode fan) const;
+  esphome::midea::ac::FanMode esphome_fan_to_midea(climate::ClimateFanMode fan) const;
+  climate::ClimateSwingMode midea_swing_to_esphome(esphome::midea::ac::SwingMode swing) const;
+  esphome::midea::ac::SwingMode esphome_swing_to_midea(climate::ClimateSwingMode swing) const;
+  climate::ClimatePreset midea_preset_to_esphome(esphome::midea::ac::Preset preset) const;
+  esphome::midea::ac::Preset esphome_preset_to_midea(climate::ClimatePreset preset) const;
+
   // Update ESPHome state from MideaUART_v2 state
   void update_esphome_state();
 };

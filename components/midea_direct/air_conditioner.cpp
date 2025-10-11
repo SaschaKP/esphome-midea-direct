@@ -16,7 +16,7 @@ void AirConditioner::setup_() {
     timer->reset();
     this->getPowerUsage_();
   });
-  this->powerUsageTimer_.start(30000);
+  this->powerUsageTimer_.start(POWER_USAGE_QUERY_INTERVAL_MS);
 }
 
 static bool checkConstraints(const Mode &mode, const Preset &preset) {
@@ -41,6 +41,14 @@ static bool checkConstraints(const Mode &mode, const Preset &preset) {
 void AirConditioner::control(const Control &control) {
   if (this->sendControl_)
     return;
+
+  // Command coalescing: avoid sending duplicate commands too quickly
+  uint32_t now = esphome::millis();
+  if (now - this->lastCommandTime_ < 100) { // 100ms debounce
+    ESP_LOGD(TAG, "Command debounced - too soon after last command");
+    return;
+  }
+
   StatusData status = this->status_;
   Mode mode = this->mode_;
   Preset preset = this->preset_;
@@ -84,6 +92,24 @@ void AirConditioner::control(const Control &control) {
     status.setPreset(preset);
     status.setBeeper(this->beeper_);
     status.appendCRC();
+
+    // Check if this command is identical to the last one sent recently
+    if (this->lastSentCommand_.size() > 0 &&
+        status.getMode() == this->lastSentCommand_.getMode() &&
+        status.getFanMode() == this->lastSentCommand_.getFanMode() &&
+        status.getSwingMode() == this->lastSentCommand_.getSwingMode() &&
+        status.getPreset() == this->lastSentCommand_.getPreset() &&
+        std::abs(status.getTargetTemp() - this->lastSentCommand_.getTargetTemp()) < 0.1f &&
+        now - this->lastCommandTime_ < 2000) { // 2 seconds
+      ESP_LOGD(TAG, "Skipping duplicate command - identical to last sent command");
+      this->sendControl_ = false;
+      return;
+    }
+
+    // Update last command tracking
+    this->lastSentCommand_ = status;
+    this->lastCommandTime_ = now;
+
     if (isModeChanged && preset != Preset::PRESET_NONE && preset != Preset::PRESET_SLEEP) {
       // Last command with preset
       this->setStatus_(status);
@@ -102,8 +128,8 @@ void AirConditioner::control(const Control &control) {
 }
 
 void AirConditioner::setStatus_(StatusData status) {
-  ESP_LOGD(TAG, "Sending immediate or priority SET_STATUS(0x40) request...");
-  this->sendImmediate(FrameType::DEVICE_CONTROL, std::move(status),
+  ESP_LOGD(TAG, "Sending user command SET_STATUS(0x40) request with high priority...");
+  this->sendUserCommand(FrameType::DEVICE_CONTROL, std::move(status),
     // onData
     std::bind(&AirConditioner::readStatus_, this, std::placeholders::_1),
     // onSuccess
@@ -140,7 +166,8 @@ void AirConditioner::getPowerUsage_() {
         this->sendUpdate();
       }
       return ResponseStatus::RESPONSE_OK;
-    }
+    },
+    nullptr, nullptr, PRIORITY_BACKGROUND
   );
 }
 
@@ -168,7 +195,8 @@ void AirConditioner::getCapabilities_() {
     [this]() {
       ESP_LOGW(TAG, "Failed to get 0xB5 capabilities report.");
       this->autoconf_status_ = AUTOCONF_ERROR;
-    }
+    },
+    PRIORITY_BACKGROUND
   );
 }
 
@@ -177,7 +205,8 @@ void AirConditioner::getStatus_() {
   ESP_LOGD(TAG, "Enqueuing a GET_STATUS(0x41) request...");
   this->queueRequest_(FrameType::DEVICE_QUERY, std::move(data),
     // onData
-    std::bind(&AirConditioner::readStatus_, this, std::placeholders::_1)
+    std::bind(&AirConditioner::readStatus_, this, std::placeholders::_1),
+    nullptr, nullptr, PRIORITY_BACKGROUND
   );
 }
 

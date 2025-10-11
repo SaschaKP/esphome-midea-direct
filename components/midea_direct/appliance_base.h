@@ -36,6 +36,11 @@ enum ResponseStatus : uint8_t {
   RESPONSE_WRONG,
 };
 
+enum RequestPriority : uint8_t {
+  PRIORITY_BACKGROUND,    // Status queries, power usage, etc.
+  PRIORITY_USER_COMMAND,  // User-initiated commands (highest priority)
+};
+
 enum FrameType : uint8_t {
   DEVICE_CONTROL = 0x02,
   DEVICE_QUERY = 0x03,
@@ -76,8 +81,11 @@ class ApplianceBase {
   /// Add listener for appliance state
   void addOnStateCallback(OnStateCallback cb) { this->state_callbacks_.push_back(cb); }
   void sendUpdate() {
-    for (auto &cb : this->state_callbacks_)
-      cb();
+    // Optimize for common case of no callbacks
+    if (!this->state_callbacks_.empty()) {
+      for (auto &cb : this->state_callbacks_)
+        cb();
+    }
   }
   AutoconfStatus getAutoconfStatus() const { return this->autoconf_status_; }
   void setAutoconf(bool state) { this->autoconf_status_ = state ? AUTOCONF_PROGRESS : AUTOCONF_DISABLED; }
@@ -89,11 +97,27 @@ class ApplianceBase {
   AutoconfStatus autoconf_status_;
   // Beeper feedback flag
   bool beeper_;
+  // User command tracking
+  bool has_pending_user_command_;
+  uint32_t last_user_command_time_;
+
+  struct Request {
+    FrameData request;
+    ResponseHandler onData;
+    Handler onSuccess;
+    Handler onError;
+    FrameType requestType;
+    RequestPriority priority;
+    ResponseStatus callHandler(const Frame &data);
+  };
 
   void queueNotify_(FrameType type, FrameData data) { this->queueRequest_(type, std::move(data), nullptr); }
-  void queueRequest_(FrameType type, FrameData data, ResponseHandler onData, Handler onSuccess = nullptr, Handler onError = nullptr);
+  void queueRequest_(FrameType type, FrameData data, ResponseHandler onData, Handler onSuccess = nullptr, Handler onError = nullptr, RequestPriority priority = PRIORITY_BACKGROUND);
   void queueRequestPriority_(FrameType type, FrameData data, ResponseHandler onData = nullptr, Handler onSuccess = nullptr, Handler onError = nullptr);
   void sendImmediate(FrameType type, FrameData data, ResponseHandler onData = nullptr, Handler onSuccess = nullptr, Handler onError = nullptr);
+  void sendUserCommand(FrameType type, FrameData data, ResponseHandler onData = nullptr, Handler onSuccess = nullptr, Handler onError = nullptr);
+  void cancelCurrentRequest();
+  bool shouldSkipPeriodicRequests() const;
   void sendFrame_(FrameType type, const FrameData &data);
   // Setup for appliances
   virtual void setup_() {}
@@ -104,14 +128,6 @@ class ApplianceBase {
   /// Calling on receiving request
   virtual void onRequest_(const Frame &frame) {}
  private:
-  struct Request {
-    FrameData request;
-    ResponseHandler onData;
-    Handler onSuccess;
-    Handler onError;
-    FrameType requestType;
-    ResponseStatus callHandler(const Frame &data);
-  };
   class FrameReceiver : public Frame {
   public:
     bool read(uart::UARTDevice *uart_device);
@@ -119,10 +135,11 @@ class ApplianceBase {
   };
   void sendNetworkNotify_(FrameType msg_type = NETWORK_NOTIFY);
   void handler_(const Frame &frame);
-  bool isWaitForResponse_() const { return this->request_ != nullptr; }
+  inline bool isWaitForResponse_() const { return this->request_ != nullptr; }
   void resetAttempts_() { this->remainAttempts_ = this->numAttempts_; }
   void destroyRequest_();
   void resetTimeout_();
+  void resetTimeout_(uint32_t customTimeout);
   void sendRequest_(Request *request) { this->sendFrame_(request->requestType, request->request); }
   // Frame receiver with dynamic buffer
   FrameReceiver receiver_{};
@@ -153,8 +170,10 @@ class ApplianceBase {
   uart::UARTDevice *uart_device_;
   // Minimal period between requests
   uint32_t period_{1000};
-  // Waiting response timeout
+  // Waiting response timeout (default for background requests)
   uint32_t timeout_{2000};
+  // User command timeout (shorter for responsiveness)
+  static constexpr uint32_t USER_COMMAND_TIMEOUT_MS = 800;
   // Number of request attempts
   uint8_t numAttempts_{3};
 };
