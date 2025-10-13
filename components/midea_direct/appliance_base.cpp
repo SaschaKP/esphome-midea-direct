@@ -182,12 +182,38 @@ void ApplianceBase::sendNetworkNotify_(FrameType msgType) {
 #ifdef USE_NETWORK
   // Parse IP string "X.X.X.X" to extract bytes
   if (!ip_str.empty() && ip_str != "0.0.0.0") {
-    int ip1, ip2, ip3, ip4;
-    if (sscanf(ip_str.c_str(), "%d.%d.%d.%d", &ip1, &ip2, &ip3, &ip4) == 4) {
-      ip_byte1 = (uint8_t)ip1;
-      ip_byte2 = (uint8_t)ip2;
-      ip_byte3 = (uint8_t)ip3;
-      ip_byte4 = (uint8_t)ip4;
+    // Simple manual IP parsing
+    const char* str = ip_str.c_str();
+    char* endptr;
+    uint8_t parts[4];
+    int part_count = 0;
+
+    // Parse each octet
+    while (*str && part_count < 4) {
+      // Skip dots
+      if (*str == '.') {
+        str++;
+        continue;
+      }
+
+      // Parse number
+      long val = strtol(str, &endptr, 10);
+      if (endptr == str || val < 0 || val > 255) {
+        break; // Invalid number
+      }
+
+      parts[part_count++] = (uint8_t)val;
+      str = endptr;
+    }
+
+    // Check if we got exactly 4 valid parts
+    if (part_count == 4) {
+      ip_byte1 = parts[0];
+      ip_byte2 = parts[1];
+      ip_byte3 = parts[2];
+      ip_byte4 = parts[3];
+    } else {
+      ESP_LOGW(TAG, "Failed to parse IP address: %s", ip_str.c_str());
     }
   }
 #endif
@@ -227,7 +253,7 @@ void ApplianceBase::resetTimeout_(uint32_t customTimeout) {
     // For user commands, use exponential backoff to avoid overwhelming the AC
     uint32_t retryDelay = customTimeout;
     if (this->has_pending_user_command_) {
-      retryDelay = std::min(customTimeout * 2, 3000u); // Cap at 3 seconds
+      retryDelay = std::min((uint16_t)(customTimeout * 2), (uint16_t)3000); // Cap at 3 seconds
     }
     this->sendRequest_(this->request_);
     this->resetTimeout_(retryDelay);
