@@ -77,6 +77,22 @@ void ApplianceBase::loop() {
   }
   if (this->isBusy_ || this->isWaitForResponse_())
     return;
+
+  // Check if we have sequenced commands waiting
+  if (!this->queue_.empty() && this->is_in_sequence_mode_) {
+    // Check if enough time has passed for next sequenced command
+    uint32_t now = esphome::millis();
+    uint32_t time_since_last = now - this->last_sequence_command_time_;
+    if (time_since_last >= INTER_COMMAND_DELAY_MS) {
+      ESP_LOGD(TAG, "Sequence delay satisfied, processing next sequenced command...");
+      this->is_in_sequence_mode_ = false; // Allow processing
+    } else {
+      // Still waiting for sequence delay, skip processing
+      ESP_LOGV(TAG, "Waiting for sequence delay (%d/%d ms)...", time_since_last, INTER_COMMAND_DELAY_MS);
+      return;
+    }
+  }
+
   if (this->queue_.empty()) {
     // Skip periodic requests if we have pending user commands
     if (!this->shouldSkipPeriodicRequests()) {
@@ -84,9 +100,20 @@ void ApplianceBase::loop() {
     }
     return;
   }
+
+  // Get next request from queue
   this->request_ = this->queue_.front();
   this->queue_.pop_front();
-  ESP_LOGD(TAG, "Getting and sending a request from the queue...");
+
+  // Handle sequenced commands specially
+  if (this->request_->priority == PRIORITY_USER_SEQUENCE) {
+    ESP_LOGD(TAG, "Processing sequenced user command...");
+    this->last_sequence_command_time_ = esphome::millis();
+    this->is_in_sequence_mode_ = true; // Set flag for next command delay
+  } else {
+    ESP_LOGD(TAG, "Getting and sending a request from the queue...");
+  }
+
   this->sendRequest_(this->request_);
   if (this->request_->onData != nullptr) {
     this->resetAttempts_();
@@ -155,12 +182,38 @@ void ApplianceBase::sendNetworkNotify_(FrameType msgType) {
 #ifdef USE_NETWORK
   // Parse IP string "X.X.X.X" to extract bytes
   if (!ip_str.empty() && ip_str != "0.0.0.0") {
-    int ip1, ip2, ip3, ip4;
-    if (sscanf(ip_str.c_str(), "%d.%d.%d.%d", &ip1, &ip2, &ip3, &ip4) == 4) {
-      ip_byte1 = (uint8_t)ip1;
-      ip_byte2 = (uint8_t)ip2;
-      ip_byte3 = (uint8_t)ip3;
-      ip_byte4 = (uint8_t)ip4;
+    // Simple manual IP parsing
+    const char* str = ip_str.c_str();
+    char* endptr;
+    uint8_t parts[4];
+    int part_count = 0;
+
+    // Parse each octet
+    while (*str && part_count < 4) {
+      // Skip dots
+      if (*str == '.') {
+        str++;
+        continue;
+      }
+
+      // Parse number
+      long val = strtol(str, &endptr, 10);
+      if (endptr == str || val < 0 || val > 255) {
+        break; // Invalid number
+      }
+
+      parts[part_count++] = (uint8_t)val;
+      str = endptr;
+    }
+
+    // Check if we got exactly 4 valid parts
+    if (part_count == 4) {
+      ip_byte1 = parts[0];
+      ip_byte2 = parts[1];
+      ip_byte3 = parts[2];
+      ip_byte4 = parts[3];
+    } else {
+      ESP_LOGW(TAG, "Failed to parse IP address: %s", ip_str.c_str());
     }
   }
 #endif
@@ -197,8 +250,13 @@ void ApplianceBase::resetTimeout_(uint32_t customTimeout) {
       return;
     }
     ESP_LOGD(TAG, "Sending request again. Attempts left: %d...", this->remainAttempts_);
+    // For user commands, use exponential backoff to avoid overwhelming the AC
+    uint32_t retryDelay = customTimeout;
+    if (this->has_pending_user_command_) {
+      retryDelay = std::min((uint16_t)(customTimeout * 2), (uint16_t)3000); // Cap at 3 seconds
+    }
     this->sendRequest_(this->request_);
-    this->resetTimeout_(customTimeout);
+    this->resetTimeout_(retryDelay);
   });
   this->responseTimer_.start(customTimeout);
 }
@@ -210,6 +268,33 @@ void ApplianceBase::destroyRequest_() {
   this->request_ = nullptr;
   // Reset user command flag when request is destroyed
   this->has_pending_user_command_ = false;
+
+  // Check if we need to schedule next sequenced command
+  if (this->is_in_sequence_mode_ && !this->queue_.empty()) {
+    uint32_t now = esphome::millis();
+    uint32_t time_since_last_command = now - this->last_sequence_command_time_;
+
+    if (time_since_last_command >= INTER_COMMAND_DELAY_MS) {
+      // Enough time has passed, schedule next command immediately
+      ESP_LOGD(TAG, "Sequence delay satisfied, scheduling next command...");
+      this->is_in_sequence_mode_ = false; // Reset for next command
+      // The loop will pick up the next command naturally
+    } else {
+      // Schedule timer for remaining delay
+      uint32_t remaining_delay = INTER_COMMAND_DELAY_MS - time_since_last_command;
+      ESP_LOGD(TAG, "Scheduling next sequenced command in %d ms...", remaining_delay);
+
+      // Use a temporary timer for sequence delay
+      static Timer sequenceTimer;
+      this->timer_manager_.registerTimer(sequenceTimer);
+      sequenceTimer.setCallback([this](Timer *timer) {
+        ESP_LOGD(TAG, "Sequence delay timer fired, enabling next command...");
+        this->is_in_sequence_mode_ = false;
+        timer->stop();
+      });
+      sequenceTimer.start(remaining_delay);
+    }
+  }
 }
 
 void ApplianceBase::sendFrame_(FrameType type, const FrameData &data) {
@@ -217,11 +302,13 @@ void ApplianceBase::sendFrame_(FrameType type, const FrameData &data) {
   ESP_LOGD(TAG, "TX: %s", frame.toString().c_str());
   this->uart_device_->write_array(frame.data(), frame.size());
   this->isBusy_ = true;
+  // Reduce busy period for user commands to improve responsiveness
+  uint32_t busyPeriod = (this->has_pending_user_command_) ? (this->period_ / 2) : this->period_;
   this->periodTimer_.setCallback([this](Timer *timer) {
     this->isBusy_ = false;
     timer->stop();
   });
-  this->periodTimer_.start(this->period_);
+  this->periodTimer_.start(busyPeriod);
 }
 
 void ApplianceBase::queueRequest_(FrameType type, FrameData data, ResponseHandler onData, Handler onSuccess, Handler onError, RequestPriority priority) {
@@ -275,8 +362,10 @@ void ApplianceBase::sendUserCommand(FrameType type, FrameData data, ResponseHand
     }
   }
 
-  // Send immediately if possible, otherwise priority queue
-  if (!isBusy_ && queue_.empty()) {
+  // Improved immediate sending logic: check if we can send immediately even if busy with background tasks
+  bool canSendImmediately = !isBusy_ || (isWaitForResponse_() && request_ == nullptr);
+
+  if (canSendImmediately) {
     ESP_LOGD(TAG, "Sending user command immediately...");
     Request *req = new Request{std::move(data), std::move(onData), std::move(onSuccess), std::move(onError), type};
     sendRequest_(req);
@@ -294,6 +383,33 @@ void ApplianceBase::sendUserCommand(FrameType type, FrameData data, ResponseHand
   }
 }
 
+void ApplianceBase::sendSequencedUserCommand(FrameType type, FrameData data, ResponseHandler onData, Handler onSuccess, Handler onError) {
+  uint32_t now = esphome::millis();
+
+  // If this is the first command in a sequence, initialize sequence tracking
+  if (!is_in_sequence_mode_) {
+    is_in_sequence_mode_ = true;
+    sequence_start_time_ = now;
+    last_sequence_command_time_ = 0; // Allow immediate first command
+    ESP_LOGD(TAG, "Starting new user command sequence...");
+  }
+
+  // Check if enough time has passed since last sequenced command
+  uint32_t time_since_last = now - last_sequence_command_time_;
+  if (time_since_last >= INTER_COMMAND_DELAY_MS) {
+    // Enough time has passed, send immediately
+    ESP_LOGD(TAG, "Sending sequenced command immediately (delay satisfied)...");
+    last_sequence_command_time_ = now;
+
+    // Use priority queuing for sequenced commands
+    queueRequest_(type, std::move(data), std::move(onData), std::move(onSuccess), std::move(onError), PRIORITY_USER_SEQUENCE);
+  } else {
+    // Not enough time, queue with sequence priority
+    ESP_LOGD(TAG, "Queuing sequenced command (waiting for delay)...");
+    queueRequest_(type, std::move(data), std::move(onData), std::move(onSuccess), std::move(onError), PRIORITY_USER_SEQUENCE);
+  }
+}
+
 void ApplianceBase::cancelCurrentRequest() {
   if (request_ != nullptr) {
     ESP_LOGD(TAG, "Cancelling current request...");
@@ -305,9 +421,16 @@ void ApplianceBase::cancelCurrentRequest() {
 }
 
 bool ApplianceBase::shouldSkipPeriodicRequests() const {
-  // Skip periodic requests if we have a recent user command pending
-  return has_pending_user_command_ &&
+  // Skip periodic requests if we have a recent user command pending or in sequence mode
+  bool has_recent_user_command = has_pending_user_command_ &&
          (esphome::millis() - last_user_command_time_) < 5000; // 5 seconds grace period
+
+  // Also skip if we're in sequence mode (processing sequenced commands)
+  bool in_sequence = is_in_sequence_mode_ ||
+         (!queue_.empty() && std::any_of(queue_.begin(), queue_.end(),
+           [](const Request* req) { return req->priority == PRIORITY_USER_SEQUENCE; }));
+
+  return has_recent_user_command || in_sequence;
 }
 
 void ApplianceBase::setBeeper(bool value) {

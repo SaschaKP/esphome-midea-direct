@@ -44,7 +44,7 @@ void AirConditioner::control(const Control &control) {
 
   // Command coalescing: avoid sending duplicate commands too quickly
   uint32_t now = esphome::millis();
-  if (now - this->lastCommandTime_ < 100) { // 100ms debounce
+  if (now - this->lastCommandTime_ < 50) { // 50ms debounce for better responsiveness
     ESP_LOGD(TAG, "Command debounced - too soon after last command");
     return;
   }

@@ -39,6 +39,7 @@ enum ResponseStatus : uint8_t {
 enum RequestPriority : uint8_t {
   PRIORITY_BACKGROUND,    // Status queries, power usage, etc.
   PRIORITY_USER_COMMAND,  // User-initiated commands (highest priority)
+  PRIORITY_USER_SEQUENCE, // Sequenced user commands with delays
 };
 
 enum FrameType : uint8_t {
@@ -100,6 +101,10 @@ class ApplianceBase {
   // User command tracking
   bool has_pending_user_command_;
   uint32_t last_user_command_time_;
+  // Sequenced command tracking
+  bool is_in_sequence_mode_;
+  uint32_t sequence_start_time_;
+  uint32_t last_sequence_command_time_;
 
   struct Request {
     FrameData request;
@@ -116,6 +121,7 @@ class ApplianceBase {
   void queueRequestPriority_(FrameType type, FrameData data, ResponseHandler onData = nullptr, Handler onSuccess = nullptr, Handler onError = nullptr);
   void sendImmediate(FrameType type, FrameData data, ResponseHandler onData = nullptr, Handler onSuccess = nullptr, Handler onError = nullptr);
   void sendUserCommand(FrameType type, FrameData data, ResponseHandler onData = nullptr, Handler onSuccess = nullptr, Handler onError = nullptr);
+  void sendSequencedUserCommand(FrameType type, FrameData data, ResponseHandler onData = nullptr, Handler onSuccess = nullptr, Handler onError = nullptr);
   void cancelCurrentRequest();
   bool shouldSkipPeriodicRequests() const;
   void sendFrame_(FrameType type, const FrameData &data);
@@ -172,8 +178,10 @@ class ApplianceBase {
   uint32_t period_{1000};
   // Waiting response timeout (default for background requests)
   uint32_t timeout_{2000};
-  // User command timeout (shorter for responsiveness)
-  static constexpr uint32_t USER_COMMAND_TIMEOUT_MS = 800;
+  // User command timeout (shorter for responsiveness, but not too aggressive)
+  static constexpr uint32_t USER_COMMAND_TIMEOUT_MS = 1200;
+  // Inter-command delay for sequenced user commands
+  static constexpr uint32_t INTER_COMMAND_DELAY_MS = 600;
   // Number of request attempts
   uint8_t numAttempts_{3};
 };
