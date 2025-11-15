@@ -1,4 +1,4 @@
-# MideaUART
+# Midea Direct
 ESPHome component re-written for ESP IDF, converted from dudanov MideaUART.
 
 Control is possible with a custom dongle. You can make it yourself according to my repo: [HERE](https://github.com/SaschaKP/midea-dongle).
