@@ -153,8 +153,8 @@ void MideaClimate::control(const climate::ClimateCall& call) {
   
   // Handle custom fan mode changes
   std::string requested_custom_fan;
-  if (call.get_custom_fan_mode().has_value()) {
-    requested_custom_fan = call.get_custom_fan_mode().value();
+  if (call.has_custom_fan_mode()) {
+    requested_custom_fan = call.get_custom_fan_mode();
     // Convert custom fan mode to Midea fan mode
     esphome::midea::ac::FanMode midea_fan;
     if (requested_custom_fan == "SILENT") {
@@ -173,8 +173,8 @@ void MideaClimate::control(const climate::ClimateCall& call) {
 
   // Handle custom preset changes
   std::string requested_custom_preset;
-  if (call.get_custom_preset().has_value()) {
-    requested_custom_preset = call.get_custom_preset().value();
+  if (call.has_custom_preset()) {
+    requested_custom_preset = call.get_custom_preset();
     // Convert custom preset to Midea preset
     esphome::midea::ac::Preset midea_preset;
     if (requested_custom_preset == "FREEZE_PROTECTION") {
@@ -337,16 +337,20 @@ climate::ClimateTraits MideaClimate::traits() {
     traits.add_supported_preset(preset);
   }
   
-  for (const auto& custom_fan_mode : custom_fan_modes_) {
-    traits.add_supported_custom_fan_mode(custom_fan_mode);
+  std::vector<const char*> custom_fan_modes_cstr;
+  for (const auto& mode : custom_fan_modes_) {
+    custom_fan_modes_cstr.push_back(mode.c_str());
   }
-  
-  for (const auto& custom_preset : custom_presets_) {
-    traits.add_supported_custom_preset(custom_preset);
+  traits.set_supported_custom_fan_modes(custom_fan_modes_cstr);
+
+  std::vector<const char*> custom_presets_cstr;
+  for (const auto& preset : custom_presets_) {
+    custom_presets_cstr.push_back(preset.c_str());
   }
+  traits.set_supported_custom_presets(custom_presets_cstr);
   
   // Temperature range exactly as MideaUART_v2
-  traits.set_supports_current_temperature(true);
+  traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
   traits.set_visual_min_temperature(16.0f);
   traits.set_visual_max_temperature(31.0f);
   traits.set_visual_temperature_step(1.0f);
