@@ -1,5 +1,5 @@
 # Midea Direct
-ESPHome component re-written for ESP IDF, converted from dudanov MideaUART.
+ESPHome component re-written for ESP IDF, converted from dudanov MideaUART to be used with ESP32 C6 MINI (WT0132C6-S5).
 
 Control is possible with a custom dongle. You can make it yourself according to my repo: [HERE](https://github.com/SaschaKP/midea-dongle).
 
@@ -30,11 +30,17 @@ esphome:
   name_add_mac_suffix: False
 
 esp32:
-  board: esp32-c6-devkitc-1
+  board: esp32-c6-devkitm-1
   #copy partitions files available on repository https://github.com/luar123/zigbee_esphome
   partitions: common/esphome/partitions_zb.csv
   framework: 
     type: esp-idf
+
+status_led:
+  pin:
+    number: GPIO8
+    inverted: True
+    ignore_strapping_warning: true
 
 #include common Wifi-OTA-API, etc
 preferences:
@@ -89,6 +95,7 @@ binary_sensor:
     name: ZigBee Btn
     pin:
       number: 9
+      ignore_strapping_warning: true
       mode:
         input: true
         pullup: true
