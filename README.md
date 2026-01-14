@@ -22,6 +22,9 @@ substitutions:
   name: "clima-test"
   friendly_name: "Clima Test"
   idname: clima_test
+  #with this and the below code, you can disallow changing temperatures above or below threshold using IR or HASSIO/MQTT
+  min_temp: 18
+  max_temp: 26
 
 #Include the board used  
 esphome:
@@ -125,6 +128,17 @@ uart:
 
 climate:
   - platform: midea_direct
+    on_state:
+      - lambda: |-
+          if (x.mode != CLIMATE_MODE_OFF) {
+            const float min = ${min_temp};
+            const float max = ${max_temp};
+            if (x.target_temperature < min) {
+              x.make_call().set_target_temperature(min).perform();
+            } else if(x.target_temperature > max) {
+              x.make_call().set_target_temperature(max).perform();
+            }
+          }
     id: $idname   # Use a unique id
     name: $friendly_name         # Use a unique name
     beeper: True
@@ -133,8 +147,8 @@ climate:
     timeout: 3s                  # Optional
     num_attempts: 1              # Optional
     visual:                      # Optional
-      min_temperature: 17 °C     # min: 17
-      max_temperature: 30 °C     # max: 30
+      min_temperature: $min_temp °C     # min: 17
+      max_temperature: $max_temp °C     # max: 30
       temperature_step: 1 °C     # min: 0.5
     supported_modes:             # Optional. All capabilities in this section may be detected by autoconf.
       - HEAT_COOL
