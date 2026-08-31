@@ -17,14 +17,31 @@ A far from complete list of supported brands:
 ## Using
 It's simple. Just use esphome and create your yaml as this below:
 
+## 🏨 B&B & Energy Saving Optimization (Anti-Tamper Control)
+
+If you are deploying this dongle in a B&B, hotel, or rental property, guests often abuse climate controls (e.g., setting the AC to 17°C in summer or 30°C in winter). This behavior severely increases energy bills and stresses the compressor.
+
+With the configuration below, you can enforce a strict **comfort lock (e.g., 24°C)**. 
+* In **COOL** mode, guests cannot go below 24°C.
+* In **HEAT** mode, guests cannot go above 24°C.
+* In **AUTO** mode, it locks tightly at 24°C.
+
+This solution works flawlessly for **both Home Assistant dashboard commands and the original physical IR remote**. It uses an isolated ESPHome script acting as a software *debounce filter* to handle UART serial transmission latency on single-degree variations, avoiding recursive command loops.
+
+### Configuration Example
+
+Add the `script` component at the root of your YAML, and update the `climate` block as follows in the example:
+
 ```yaml
 substitutions:
   name: "clima-test"
   friendly_name: "Clima Test"
   idname: clima_test
   #with this and the below code, you can disallow changing temperatures above or below threshold using IR or HASSIO/MQTT
-  min_temp: 18
-  max_temp: 26
+  min_temp: "17"  # Allowed visual minimum
+  max_temp: "30"  # Allowed visual maximum
+  med_temp: "24"  # The absolute lock threshold (e.g., 24.0 °C)
+
 
 #Include the board used  
 esphome:
@@ -128,17 +145,10 @@ uart:
 
 climate:
   - platform: midea_direct
+    # Trigger the anti-tamper script safely without passing abstract C++ objects
     on_state:
       - lambda: |-
-          if (x.mode != CLIMATE_MODE_OFF) {
-            const float min = ${min_temp};
-            const float max = ${max_temp};
-            if (x.target_temperature < min) {
-              x.make_call().set_target_temperature(min).perform();
-            } else if(x.target_temperature > max) {
-              x.make_call().set_target_temperature(max).perform();
-            }
-          }
+          id(controlla_limiti_clima).execute();
     id: $idname   # Use a unique id
     name: $friendly_name         # Use a unique name
     beeper: True
@@ -166,6 +176,38 @@ climate:
       - FREEZE_PROTECTION
     supported_swing_modes:        # All capabilities in this section detected by autoconf.
       - VERTICAL
+
+script:
+  - id: controlla_limiti_clima
+    mode: restart # Resets the timer on consecutive keypresses, processing only the final stable value
+    then:
+      - delay: 3000ms # Essential buffer to let the UART internal variables sync with the AC motherboard
+      - lambda: |-
+          auto c = id($idname);
+          const float med = ${med_temp};
+          bool correggi = false;
+
+          if (c->mode == CLIMATE_MODE_COOL) {
+            if (c->target_temperature < med) {
+              correggi = true;
+            }
+          }
+          else if (c->mode == CLIMATE_MODE_HEAT) {
+            if (c->target_temperature > med) {
+              correggi = true;
+            }
+          }
+          else if (c->mode == CLIMATE_MODE_HEAT_COOL) {
+            if (c->target_temperature != med) {
+              correggi = true;
+            }
+          }
+
+          if (correggi) {
+            auto call = c->make_call();
+            call.set_target_temperature(med);
+            call.perform();
+          }
 ```
 
 
