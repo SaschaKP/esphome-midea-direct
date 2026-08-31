@@ -70,6 +70,18 @@ void MideaClimate::setup() {
   // First call ApplianceBase::setup() which calls our setup_() override
   ApplianceBase::setup();
   
+  std::vector<const char*> custom_fan_modes_cstr;
+  for (const auto& mode : custom_fan_modes_) {
+    custom_fan_modes_cstr.push_back(mode.c_str());
+  }
+  this->set_supported_custom_fan_modes(custom_fan_modes_cstr);
+
+  std::vector<const char*> custom_presets_cstr;
+  for (const auto& preset : custom_presets_) {
+    custom_presets_cstr.push_back(preset.c_str());
+  }
+  this->set_supported_custom_presets(custom_presets_cstr);
+  
   ESP_LOGD(TAG, "MideaUART_v2 initialization complete");
   
   // Set initial ESPHome state
@@ -336,19 +348,7 @@ climate::ClimateTraits MideaClimate::traits() {
   for (auto preset : supported_presets_) {
     traits.add_supported_preset(preset);
   }
-  
-  std::vector<const char*> custom_fan_modes_cstr;
-  for (const auto& mode : custom_fan_modes_) {
-    custom_fan_modes_cstr.push_back(mode.c_str());
-  }
-  traits.set_supported_custom_fan_modes(custom_fan_modes_cstr);
 
-  std::vector<const char*> custom_presets_cstr;
-  for (const auto& preset : custom_presets_) {
-    custom_presets_cstr.push_back(preset.c_str());
-  }
-  traits.set_supported_custom_presets(custom_presets_cstr);
-  
   // Temperature range exactly as MideaUART_v2
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
   traits.set_visual_min_temperature(16.0f);

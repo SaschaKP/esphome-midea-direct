@@ -175,7 +175,9 @@ void ApplianceBase::sendNetworkNotify_(FrameType msgType) {
   }
   
   // Extract IP address bytes from string representation (most compatible method)
-  std::string ip_str = real_ip.str();
+  char buf[esphome::network::IP_ADDRESS_BUFFER_SIZE];
+  real_ip.str_to(buf);
+  std::string ip_str = buf;
 #endif
   uint8_t ip_byte1 = 192, ip_byte2 = 168, ip_byte3 = 1, ip_byte4 = 100; // Default fallback
   
