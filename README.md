@@ -51,8 +51,6 @@ esphome:
 
 esp32:
   board: esp32-c6-devkitm-1
-  #copy partitions files available on repository https://github.com/luar123/zigbee_esphome
-  partitions: common/esphome/partitions_zb.csv
   framework: 
     type: esp-idf
 
